@@ -12,28 +12,28 @@ class policy_value_network(object):
         self.is_logging = True
 
         """reset TF Graph"""
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
         """Creat a new graph for the network"""
         # g = tf.Graph()
 
-        self.sess = tf.Session()
+        self.sess = tf.compat.v1.Session()
         # self.sess = tf.InteractiveSession()
 
         # Variables
         self.filters_size = 128    # or 256
         self.prob_size = 2086
         self.digest = None
-        self.training = tf.placeholder(tf.bool, name='training')
-        self.inputs_ = tf.placeholder(tf.float32, [None, 9, 10, 14], name='inputs')  # + 2    # TODO C plain x 2
+        self.training = tf.compat.v1.placeholder(tf.bool, name='training')
+        self.inputs_ = tf.compat.v1.placeholder(tf.float32, [None, 9, 10, 14], name='inputs')  # + 2    # TODO C plain x 2
         self.c_l2 = 0.0001
         self.momentum = 0.9
         self.global_norm = 100
-        self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')    #0.001    #5e-3    #0.05    #
+        self.learning_rate = tf.compat.v1.placeholder(tf.float32, name='learning_rate', shape=[])    #0.001    #5e-3    #0.05    #
         tf.summary.scalar('learning_rate', self.learning_rate)
 
         # First block
-        self.pi_ = tf.placeholder(tf.float32, [None, self.prob_size], name='pi')
-        self.z_ = tf.placeholder(tf.float32, [None, 1], name='z')
+        self.pi_ = tf.compat.v1.placeholder(tf.float32, [None, self.prob_size], name='pi')
+        self.z_ = tf.compat.v1.placeholder(tf.float32, [None, 1], name='z')
 
         # NWHC format
         # batch, 9 * 10, 14 channels
@@ -42,11 +42,11 @@ class policy_value_network(object):
         #     The ordering of the dimensions in the inputs.
         #     `channels_last` corresponds to inputs with shape `(batch, width, height, channels)`
         #   while `channels_first` corresponds to inputs with shape `(batch, channels, width, height)`.
-        self.layer = tf.layers.conv2d(self.inputs_, self.filters_size, 3, padding='SAME')  # filters 128(or 256)
+        self.layer = tf.keras.layers.Conv2D(self.filters_size, (3, 3), padding='same')(self.inputs_)  # filters 128(or 256)
 
-        self.layer = tf.contrib.layers.batch_norm(self.layer, center=False, epsilon=1e-5, fused=True,
-                                                  is_training=self.training, activation_fn=tf.nn.relu)    # epsilon = 0.25
-
+        
+        self.layer = tf.keras.layers.BatchNormalization(center=False, epsilon=1e-5)(self.layer, training=self.training)
+        self.layer = tf.keras.layers.Activation('relu')(self.layer)
         # residual_block
         with tf.name_scope("residual_block"):
             for _ in range(res_block_nums):
@@ -54,24 +54,22 @@ class policy_value_network(object):
 
         # policy_head
         with tf.name_scope("policy_head"):
-            self.policy_head = tf.layers.conv2d(self.layer, 2, 1, padding='SAME')
-            self.policy_head = tf.contrib.layers.batch_norm(self.policy_head, center=False, epsilon=1e-5, fused=True,
-                                                            is_training=self.training, activation_fn=tf.nn.relu)
+            self.policy_head = tf.keras.layers.Conv2D(2, (1, 1), padding='SAME')(self.layer)
+            self.policy_head = tf.keras.layers.BatchNormalization(center=False, epsilon=1e-5)(self.policy_head, training=self.training)
 
             # print(self.policy_head.shape)  # (?, 9, 10, 2)
             self.policy_head = tf.reshape(self.policy_head, [-1, 9 * 10 * 2])
-            self.policy_head = tf.contrib.layers.fully_connected(self.policy_head, self.prob_size, activation_fn=None)
+            self.policy_head = tf.keras.layers.Dense(self.prob_size, activation=None)(self.policy_head)
             # self.prediction = tf.nn.softmax(self.policy_head)
 
         # value_head
         with tf.name_scope("value_head"):
-            self.value_head = tf.layers.conv2d(self.layer, 1, 1, padding='SAME')
-            self.value_head = tf.contrib.layers.batch_norm(self.value_head, center=False, epsilon=1e-5, fused=True,
-                                                           is_training=self.training, activation_fn=tf.nn.relu)
+            self.value_head = tf.keras.layers.Conv2D(1, (1, 1), padding='SAME')(self.layer)
+            self.value_head = tf.keras.layers.BatchNormalization(center=False, epsilon=1e-5)(self.value_head, training=self.training)
             # print(self.value_head.shape)  # (?, 9, 10, 1)
             self.value_head = tf.reshape(self.value_head, [-1, 9 * 10 * 1])
-            self.value_head = tf.contrib.layers.fully_connected(self.value_head, 256, activation_fn=tf.nn.relu)
-            self.value_head = tf.contrib.layers.fully_connected(self.value_head, 1, activation_fn=tf.nn.tanh)
+            self.value_head = tf.keras.layers.Dense(256, activation=tf.nn.relu)(self.value_head)
+            self.value_head = tf.keras.layers.Dense(1, activation=tf.nn.tanh)(self.value_head)
 
         # loss
         with tf.name_scope("loss"):
@@ -151,12 +149,11 @@ class policy_value_network(object):
     def residual_block(self, in_layer):
         orig = tf.identity(in_layer)
 
-        layer = tf.layers.conv2d(in_layer, self.filters_size, 3, padding='SAME')  # filters 128(or 256)
-        layer = tf.contrib.layers.batch_norm(layer, center=False, epsilon=1e-5, fused=True,
-                                             is_training=self.training, activation_fn=tf.nn.relu)
+        layer = tf.keras.layers.Conv2D(self.filters_size, (3, 3), padding='SAME')(in_layer)  # filters 128(or 256)
+        layer = tf.keras.layers.BatchNormalization(center=False, epsilon=1e-5)(layer, training=self.training)
 
-        layer = tf.layers.conv2d(layer, self.filters_size, 3, padding='SAME')  # filters 128(or 256)
-        layer = tf.contrib.layers.batch_norm(layer, center=False, epsilon=1e-5, fused=True, is_training=self.training)
+        layer = tf.keras.layers.Conv2D(self.filters_size, (3, 3), padding='SAME')(layer)  # filters 128(or 256)
+        layer = tf.keras.layers.BatchNormalization(center=False, epsilon=1e-5)(layer, training=self.training)
         out = tf.nn.relu(tf.add(orig, layer))
 
         return out

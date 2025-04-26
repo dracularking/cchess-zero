@@ -1,3 +1,5 @@
+import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
 #coding:utf-8
 from asyncio import Future
 import asyncio
